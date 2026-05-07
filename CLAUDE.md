@@ -14,11 +14,23 @@ Highlights of recent stable behavior:
 - **📊 Context Optimization** - Response modes (`auto`/`summary`/`minimal`/`standard`/`detailed`/`raw`) for budget control
 
 ### Architecture
-- **Framework**: FastMCP 2.0+ (3.2.4 in current venv)
-- **Runtime**: Python 3.8+ (3.13 in current venv)
-- **Integration**: AppleScript via subprocess + Things URL scheme for checklists
-- **Testing**: pytest with mocked AppleScript operations (469 unit tests)
-- **Platform**: macOS 12.0+ with Things 3 installed
+
+- **Framework**: FastMCP 2.0+ (3.2.4 in current venv) | **Runtime**: Python 3.8+ (3.13 in venv) | **Platform**: macOS 12.0+ with Things 3
+- **Bridge to Things 3**: AppleScript via `subprocess` for most operations; **Things URL scheme** for checklist writes (transparent fallback inside `add_todo`).
+- **Reads vs writes**: reads go through the `things.py` library against the Things 3 SQLite DB (fast); writes go through AppleScript / URL scheme (slow, single-threaded, queued).
+
+Layered structure:
+
+```
+server.py                 — 37 MCP tools, param validation, context-budget optimization
+  └─ tools.py             — ThingsTools facade, dispatches to layer below
+       ├─ services/applescript_manager  → subprocess + URL scheme execution
+       ├─ services/tag_service          → tag-creation policy enforcement
+       ├─ services/validation_service   → date/parameter validation
+       └─ scheduling/                   → date strategies, recurring todos, search
+```
+
+For deeper detail (parser internals, cache strategy, queue mechanics), see `docs/ARCHITECTURE.md`.
 
 ### Related Docs
 - `docs/ARCHITECTURE.md` — system layout
@@ -43,13 +55,6 @@ pytest                          # Run all tests
 pytest tests/unit/              # Unit tests only
 pytest tests/integration/       # Integration tests
 pytest --cov=src/things_mcp     # With coverage
-```
-
-### File Organization
-```
-src/things_mcp/     # Source code
-tests/              # Test files  
-docs/               # Documentation
 ```
 
 ### AppleScript Integration
@@ -97,150 +102,36 @@ When registering a new `@self.mcp.tool()` in `server.py`:
 
 ## 🏷️ Tag Management
 
-### Working with Tags
+Rules that aren't visible from tool signatures:
 
-**Important**: Tags must be created in Things 3 before they can be used via the API. The AI assistant cannot create tags programmatically.
+- **Tags must pre-exist in Things 3.** AI cannot create them via the API by default (controlled by `ai_can_create_tags` in config); ask the user to create unknown tags in the Things 3 UI.
+- **Case-sensitive.** `"Work"` and `"work"` are distinct tags.
+- **Comma-separated, no spaces.** `tags="work,urgent"` — `tags="work, urgent"` produces a tag literally named `" urgent"` with leading whitespace.
+- **Non-existent tags are silently filtered.** No error is raised; call `get_tags()` first if you need certainty.
+- **`add_tags` is set-semantic / idempotent** — adding the same tag twice is a no-op. `add_checklist_items` is *not* idempotent (each call appends).
 
-```python
-# Get all available tags
-tags = get_tags()  # Returns count-only by default
-tags = get_tags(include_items=true)  # Returns full item lists
-
-# Get todos with a specific tag
-work_todos = get_tagged_items(tag="Work")
-urgent_todos = get_tagged_items(tag="urgent")
-```
-
-### Adding Tags
-
-```python
-# Single tag
-add_tags(todo_id="abc123", tags="urgent")
-
-# Multiple tags (comma-separated, no spaces)
-add_tags(todo_id="abc123", tags="work,urgent,review")
-
-# When creating todos
-add_todo(
-    title="Review proposal",
-    tags="work,urgent,review",  # Comma-separated
-    when="today"
-)
-
-# Bulk update with tags
-bulk_update_todos(
-    todo_ids="id1,id2,id3",
-    tags="urgent,Q4"  # Replaces existing tags
-)
-```
-
-### Removing Tags
-
-```python
-# Remove single tag
-remove_tags(todo_id="abc123", tags="urgent")
-
-# Remove multiple tags (comma-separated, no spaces)
-remove_tags(todo_id="abc123", tags="urgent,review,old-tag")
-
-# Tag names are case-sensitive
-remove_tags(todo_id="abc123", tags="Work")   # Removes "Work"
-remove_tags(todo_id="abc123", tags="work")   # Removes "work" (different tag)
-```
-
-### Tag Best Practices
-
-1. **Check Available Tags First**:
-   ```python
-   # See what tags exist
-   tags = get_tags()
-   # If tag doesn't exist, ask user to create it in Things 3
-   ```
-
-2. **Format Requirements**:
-   - Use comma separation: `"tag1,tag2,tag3"`
-   - No spaces after commas: `"work,urgent"` not `"work, urgent"`
-   - Case-sensitive: `"Work"` ≠ `"work"`
-
-3. **Tag Filtering**:
-   - Non-existent tags are silently filtered (no error)
-   - Only existing tags will be added/removed
-   - Use `get_tags()` to validate tags exist
-
-4. **Tag Search**:
-   ```python
-   # Search by tag
-   search_advanced(tag="urgent", status="incomplete")
-
-   # Get all items with specific tag
-   get_tagged_items(tag="work")
-   ```
+Relevant tools: `get_tags`, `get_tagged_items`, `add_tags`, `remove_tags`, `create_tag`. Signatures live in `server.py`.
 
 ## 🔧 Tool Usage Best Practices
 
-### Response Mode Selection
+### Response modes (`mode` param on retrieval tools)
 
-When working with retrieval tools (`get_todos`, `search_todos`, list tools), use the `mode` parameter for optimal context usage:
+| Mode | When to use |
+|---|---|
+| `auto` | Default for unknown dataset sizes — adapts |
+| `summary` | Quick count + preview for large collections (>100 items) |
+| `minimal` | IDs + titles + status — perfect for "find then bulk-update" workflows |
+| `standard` | Common fields — default for daily workflows |
+| `detailed` | All fields — use only when you need everything |
+| `raw` | Unfiltered passthrough — debugging |
 
-**Available Modes:**
-- `auto` - Automatically selects optimal mode based on data size (recommended for unknown datasets)
-- `summary` - Returns count and preview only (best for large collections)
-- `minimal` - Returns essential fields only (IDs, titles, status)
-- `standard` - Returns common fields (default for most operations)
-- `detailed` - Returns all fields (use only when needed)
-- `raw` - Returns unfiltered data
+Context budget: standard ~1KB/item, minimal ~50B/item, summary ~200B fixed. For 100+ items, start with `summary` or `minimal`.
 
-**Workflow Examples:**
+### Performance hints not visible from signatures
 
-1. **Daily Review**
-   ```
-   get_today(mode='standard', limit=20)
-   ```
-
-2. **Project Analysis**
-   ```
-   # First get overview
-   get_todos(project_uuid='...', mode='summary')
-   # Then drill down to specifics
-   get_todos(project_uuid='...', mode='detailed', limit=10)
-   ```
-
-3. **Bulk Operations**
-   ```
-   # Get IDs efficiently
-   search_todos(query='overdue', mode='minimal', limit=100)
-   # Perform bulk update
-   bulk_update_todos(todo_ids='...', completed='true')
-   ```
-
-### Context Budget Guidelines
-
-- **Standard mode**: ~1KB per item
-- **Minimal mode**: ~50 bytes per item
-- **Summary mode**: Fixed ~200 bytes total
-- For 100+ items, always start with `mode='summary'` or `mode='minimal'`
-
-### Performance Tips
-
-1. **Use specific list tools** instead of filtering `get_todos`:
-   - `get_today()` is faster than `get_todos()` with date filtering
-   - `get_tagged_items(tag='work')` is faster than searching
-
-2. **Batch operations** when possible:
-   - Use `bulk_update_todos` for multiple todos (supports multi-field updates)
-   - Use `bulk_move_records` instead of multiple `move_record` calls
-   - Optimal batch size: 2-50 todos per operation
-
-3. **Multi-field bulk updates** (efficient for large updates):
-   ```python
-   # Update multiple fields in one operation
-   bulk_update_todos(
-       todo_ids="id1,id2,id3,id4,id5",
-       tags="urgent,Q4",
-       when="today",
-       notes="Updated in batch review"
-   )
-   ```
+- **Specific list tools beat filtered `get_todos`.** `get_today()` is faster than `get_todos(when='today')`. `get_tagged_items(tag='work')` is faster than `search_todos(query='work')`.
+- **Bulk batch sweet-spot**: 2–50 todos per `bulk_update_todos` / `bulk_move_records` call. Above 50, chunk.
+- **Single-field updates in a loop are O(N) AppleScript invocations.** Always prefer bulk.
 
 ## 📁 Hierarchical Organization (Projects & Areas)
 
@@ -254,230 +145,34 @@ Areas (Life/Work Domains)
         └── Checklist Items (Sub-tasks)
 ```
 
-### Working with Areas
+### Destination format for `move_record` / `bulk_move_records`
 
-Areas represent life domains (Work, Personal, Learning, etc.):
+| Target | Format |
+|---|---|
+| Inbox / Today / Anytime / Someday / Logbook / Upcoming | string literal: `"inbox"`, `"today"`, etc. |
+| Project | `"project:{id}"` |
+| Area | `"area:{id}"` |
 
-```python
-# Get all areas
-areas = get_areas(mode='summary')  # Quick overview
-areas = get_areas(mode='standard')  # Full list
-areas = get_areas(include_items=true, mode='detailed')  # With projects and todos
+### Status filtering
 
-# Create project in specific area
-add_project(
-    title="New Project",
-    area_id="abc123",  # Recommended - more reliable
-    deadline="2025-12-31"
-)
+`get_todos(status=...)` accepts `"incomplete"` (default) / `"completed"` / `"canceled"` / `None` (all).
 
-# Or use area name
-add_project(
-    title="New Project",
-    area_title="Personal",  # Convenient but requires unique names
-    deadline="2025-12-31"
-)
-```
+### Checklist support
 
-### Working with Projects
+Checklists are written via the **Things URL scheme**, not AppleScript — the server transparently switches modes when `checklist_items` is passed to `add_todo`. Max 100 items per todo. To clear: pass `items=[]` to `replace_checklist_items`.
 
-Projects are time-bound outcomes with associated tasks:
+### Patterns not visible from signatures
 
-```python
-# Create project
-project_id = add_project(
-    title="Website Redesign",
-    area_title="Work",
-    deadline="2025-12-31",
-    tags="high-priority,design",
-    notes="Complete redesign of company website"
-)
+- **Prefer `area_id` over `area_title`.** Title-based lookup breaks when areas have non-unique names.
+- **`add_project(todos="line1\nline2")`** creates the project + initial todos atomically (newline-separated, *not* comma-separated — historic inconsistency, see `docs/V2_API_MIGRATION.md`).
+- **Headings** organize todos within a project; passed as `heading="Phase 1"` to `add_todo`.
+- **Parameter limits**: search ≤500, logbook ≤100, date-range ≤365 days, bulk ops 2–50 sweet-spot.
 
-# Add todos to project (must be done separately)
-add_todo(title="Research competitors", list_id=project_id, heading="Research")
-add_todo(title="Create wireframes", list_id=project_id, heading="Design")
-add_todo(title="Implement homepage", list_id=project_id, heading="Development")
+### ⚠️ Known context-bombs
 
-# Update project
-update_project(
-    id=project_id,
-    deadline="2026-01-15",
-    tags="urgent,design,review-needed"
-)
+- **NEVER `get_projects(include_items=true)`** — generates 252K+ tokens for ~70 projects, exceeds Claude context. Always use `mode='summary'` first, then drill into specific projects via `get_todos(project_uuid=...)`.
 
-# Get projects
-get_projects(mode='summary')  # Count and preview
-get_projects(mode='minimal')  # IDs and names only
-get_projects(mode='standard')  # Full details
-```
-
-### Moving Todos Between Projects
-
-```python
-# Move single todo
-move_record(
-    todo_id="todo123",
-    destination_list="project:project456"
-)
-
-# Move multiple todos (bulk operation - much faster)
-bulk_move_records(
-    todo_ids="todo1,todo2,todo3",
-    destination="project:project456",
-    preserve_scheduling=true
-)
-```
-
-### Destination Formats
-
-| Target | Format | Example |
-|--------|--------|---------|
-| Inbox | `"inbox"` | `move_record(todo_id="123", destination_list="inbox")` |
-| Today | `"today"` | `move_record(todo_id="123", destination_list="today")` |
-| Anytime | `"anytime"` | `move_record(todo_id="123", destination_list="anytime")` |
-| Someday | `"someday"` | `move_record(todo_id="123", destination_list="someday")` |
-| Project | `"project:{id}"` | `move_record(todo_id="123", destination_list="project:xyz")` |
-
-### Status Filtering
-
-The `get_todos()` function supports filtering by completion status:
-
-```python
-# Get incomplete todos (default behavior)
-get_todos(project_uuid="abc123")
-get_todos(project_uuid="abc123", status="incomplete")
-
-# Get ALL todos (completed + incomplete + canceled)
-get_todos(project_uuid="abc123", status=None)
-
-# Get only completed todos
-get_todos(project_uuid="abc123", status="completed")
-
-# Get only canceled todos
-get_todos(project_uuid="abc123", status="canceled")
-
-# Works without project filter too
-get_todos(status="completed")  # All completed todos
-get_todos(status=None)  # All todos regardless of status
-```
-
-**Status Parameter Options:**
-- `'incomplete'` (default) - Only active, uncompleted todos
-- `'completed'` - Only completed todos
-- `'canceled'` - Only canceled todos
-- `None` - All todos regardless of status
-
-This feature is useful for:
-- Reviewing completed work in a project
-- Analyzing canceled todos
-- Getting complete project history
-- Status-based reporting and analytics
-
-### Checklist Support ✅
-
-**Checklist items are now fully supported** via the Things 3 URL scheme API. The server automatically uses the URL scheme when checklist items are provided.
-
-#### Creating Todos with Checklists
-
-```python
-# Create todo with checklist items
-add_todo(
-    title="Grocery Shopping",
-    notes="Weekly shopping list",
-    checklist_items=["Milk", "Bread", "Eggs", "Butter"],  # List of strings
-    when="today"
-)
-
-# With project and tags
-add_todo(
-    title="Release v2.0",
-    checklist_items=["Run tests", "Update docs", "Create changelog", "Tag release"],
-    list_id="project123",
-    tags="work,release",
-    deadline="2025-12-31"
-)
-```
-
-#### Managing Checklist Items
-
-```python
-# Add items to existing todo (appends to end)
-add_checklist_items(
-    todo_id="abc123",
-    items=["New item 1", "New item 2"]
-)
-
-# Prepend items to beginning
-prepend_checklist_items(
-    todo_id="abc123",
-    items=["Urgent item", "High priority"]
-)
-
-# Replace all checklist items
-replace_checklist_items(
-    todo_id="abc123",
-    items=["Item 1", "Item 2", "Item 3"]
-)
-
-# Clear all checklist items
-replace_checklist_items(
-    todo_id="abc123",
-    items=[]  # Empty list clears checklist
-)
-```
-
-**Format Requirements:**
-- Items are passed as a list of strings: `["item1", "item2", "item3"]`
-- Maximum 100 checklist items per todo
-- Items can be marked complete/incomplete in Things 3 UI
-
-**Implementation Details:**
-- Checklists use Things URL scheme API (not AppleScript)
-- URL scheme is automatically used when `checklist_items` parameter is provided
-- Todo ID is retrieved after creation by searching for the newly created todo
-- Non-checklist todos still use faster AppleScript approach
-
-### Known Limitations
-
-1. **Project include_items context explosion**: ⚠️ **NEVER use `get_projects(include_items=true)`** - generates 252K+ tokens for 73 projects, exceeding context limits. Always use `get_projects(mode='summary')` first, then query specific projects.
-
-**Workarounds:**
-- Use `get_projects(mode='minimal')` to get IDs, then query specific projects
-- Never use `include_items=true` - causes context overflow
-
-### Hierarchical Best Practices
-
-1. Use areas for life domains (Work, Personal, Learning)
-2. Use projects for time-bound outcomes with clear deadlines
-3. Use headings within projects to organize phases
-4. Start with `mode='summary'` for large project lists
-5. Use `area_id` instead of `area_title` for reliability
-6. Batch todo moves with `bulk_move_records()`
-7. Create tags in Things 3 before using in API
-
-**For Complete Details:** See `docs/USER_EXAMPLES.md` and `docs/BULK_OPERATIONS_GUIDE.md`
-
-### Error Prevention
-
-1. **Tags must exist** - AI cannot create tags automatically
-   - Use `get_tags()` to see available tags
-   - Ask user to create new tags if needed
-   - Tag names are case-sensitive: `"Work"` ≠ `"work"`
-   - Use comma-separated format: `"tag1,tag2"` not `"tag1, tag2"`
-
-2. **Date formats** - Use consistent formats:
-   - Dates: `YYYY-MM-DD` or `'today'`, `'tomorrow'`, `'someday'`
-
-3. **Limits** - Respect parameter limits:
-   - Search results: max 500
-   - Logbook: max 100
-   - Date ranges: max 365 days
-   - Bulk operations: optimal 2-50 todos
-
-4. **Bulk operations** - Multi-field updates:
-   - All specified fields are applied to each todo
-   - Fields: title, notes, when, deadline, tags, completed, canceled
-   - Format IDs as comma-separated: `"id1,id2,id3"`
+For end-user-style examples, see `docs/USER_EXAMPLES.md`. For bulk-op patterns, see `docs/BULK_OPERATIONS_GUIDE.md`.
 
 ## ⚠️ Common Pitfalls & Solutions
 
@@ -550,146 +245,10 @@ today = get_today(mode='standard', limit=20)
 - Run tests before committing
 - Update documentation for API changes
 
-## Release Process
+## Release & Refactoring
 
-When creating a new release, follow these steps to ensure version consistency across all files:
-
-### 1. Update Version Numbers
-
-**Critical Files (MUST update):**
-
-```bash
-# 1. Update package version
-# File: pyproject.toml (line 7)
-version = "X.Y.Z"
-
-# 2. Update runtime version
-# File: src/things_mcp/__init__.py (line 3)
-__version__ = "X.Y.Z"
-
-# 3. Update CHANGELOG
-# File: CHANGELOG.md (top of file)
-## [X.Y.Z] - YYYY-MM-DD
-
-### Fixed
-- Bug fix description
-
-### Added
-- New feature description
-
-### Changed
-- Change description
-```
-
-### 2. Commit and Tag
-
-```bash
-# Run tests first
-pytest
-
-# Commit changes
-git add pyproject.toml src/things_mcp/__init__.py CHANGELOG.md
-git commit -m "Release vX.Y.Z - Brief description"
-
-# Push to GitHub
-git push origin main
-
-# Create and push tag
-git tag vX.Y.Z
-git push origin vX.Y.Z
-```
-
-### 3. Create GitHub Release
-
-```bash
-# Create release with notes from CHANGELOG
-gh release create vX.Y.Z \
-  --title "vX.Y.Z - Release Title" \
-  --notes "$(sed -n '/## \[X.Y.Z\]/,/## \[/p' CHANGELOG.md | head -n -1)"
-```
-
-### 4. Publish to PyPI
-
-```bash
-# Build distribution packages
-python -m build
-
-# Upload to PyPI
-python -m twine upload dist/mcp_server_things-X.Y.Z*
-```
-
-### Version Consistency Notes
-
-- **pyproject.toml** - Package version for pip/PyPI
-- **src/things_mcp/__init__.py** - Runtime version (used by server.py)
-- **CHANGELOG.md** - Version history with dates
-- Version is automatically synced: `__version__` is imported by server.py and reported via `get_server_capabilities()`
-- No need to update version in documentation examples (README.md, CONTRIBUTING.md) - those are placeholders
-
-### Release Checklist
-
-- [ ] All tests pass (`pytest`)
-- [ ] Version updated in `pyproject.toml`
-- [ ] Version updated in `src/things_mcp/__init__.py`
-- [ ] CHANGELOG.md updated with date and changes
-- [ ] Committed with descriptive message
-- [ ] Pushed to GitHub
-- [ ] Git tag created and pushed
-- [ ] GitHub release created
-- [ ] Published to PyPI
-- [ ] Verify version reporting: AI should report correct version when queried
-
-## Code Quality Improvements
-
-### Active Refactoring Plan
-
-**Status:** Planning Phase
-**Document:** `docs/REFACTORING_PLAN.md`
-
-A comprehensive 10-week, 8-phase refactoring plan has been created to improve code quality:
-
-**Current Issues:**
-- 5 bare `except:` blocks hiding errors
-- 19 functions >100 lines (largest: 214 lines)
-- 4 files >1,300 lines (largest: 1,657 lines)
-- 31 duplicate AppleScript invocations
-- Complex 193-line string parser
-
-**Target Improvements:**
-- Zero bare except blocks (specific exception types + logging)
-- All functions <100 lines (target: 80)
-- All files <1,000 lines (target: 500)
-- Consolidated AppleScript patterns via templates
-- State machine-based parser
-
-**Phased Approach:**
-1. **Phase 1 (Week 1):** Fix bare except blocks - LOW RISK
-2. **Phase 2 (Weeks 2-3):** Parser refactoring - HIGH RISK, feature-flagged
-3. **Phase 3 (Weeks 4-5):** Function decomposition - MEDIUM RISK
-4. **Phase 4 (Week 6):** File organization - MEDIUM RISK
-5. **Phase 5 (Week 7):** Consolidate AppleScript patterns - LOW RISK
-6. **Phase 6 (Week 8):** Error handling improvements - LOW RISK
-7. **Phase 7 (Week 9):** Documentation - LOW RISK
-8. **Phase 8 (Week 10):** Performance testing - LOW RISK
-
-**Constraints:**
-- ✅ 100% backwards compatibility (no breaking changes)
-- ✅ All 330+ tests must continue to pass
-- ✅ No performance regressions >10%
-- ✅ Incremental commits (each passes tests)
-
-**For Swarm Implementation:**
-- See `docs/REFACTORING_PLAN.md` for detailed task breakdown
-- Each phase has specific deliverables and validation steps
-- Parallel execution possible for Phase 1, 3, 4 tasks
-- Feature flags for high-risk changes (Phase 2)
-
-When implementing refactoring tasks, always:
-1. Read the detailed task specification in REFACTORING_PLAN.md
-2. Run tests before making changes
-3. Make minimal, focused changes
-4. Run full test suite after changes
-5. Commit only if all tests pass
+- **Releasing a new version**: see `docs/RELEASE_PROCESS.md` (4-step procedure: bump 3 files → tag → GitHub release → PyPI).
+- **Active refactoring plan**: see `docs/REFACTORING_PLAN.md` — 10-week / 8-phase plan with hard `100% backwards compatibility` constraint. API changes (e.g. native list params) are explicitly out of scope and live in `docs/V2_API_MIGRATION.md`.
 
 ## Important Reminders
 - Never hardcode authentication tokens
