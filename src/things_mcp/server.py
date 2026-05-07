@@ -1398,13 +1398,14 @@ class ThingsMCPServer:
         async def get_server_capabilities(request: Optional[ServerCapabilitiesRequest] = None) -> Dict[str, Any]:
             """Report server capabilities, features, and tool inventory."""
             try:
+                tool_count = len(await self.mcp.list_tools())
                 capabilities = {
                     "server_info": {
                         "name": "Things 3 MCP Server",
                         "version": __version__,
                         "platform": "macOS",
-                        "framework": "FastMCP 2.0",
-                        "total_tools": 27  # Updated count including new tools
+                        "framework": "FastMCP 2.0+",
+                        "total_tools": tool_count
                     },
                     "features": {
                         "context_optimization": {
@@ -1450,7 +1451,7 @@ class ThingsMCPServer:
                         }
                     },
                     "api_coverage": {
-                        "total_tools": 27,
+                        "total_tools": tool_count,
                         "applescript_coverage_percentage": 45,
                         "workflow_operations": ["create", "read", "update", "delete", "move", "search"],
                         "list_operations": ["inbox", "today", "upcoming", "anytime", "someday", "logbook", "trash"],

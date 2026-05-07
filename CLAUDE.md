@@ -4,18 +4,29 @@
 
 **Things 3 MCP Server** - A Model Context Protocol server that enables AI assistants to interact with Things 3 via AppleScript on macOS.
 
-### ✨ Latest Features (v1.2.2)
-- **🏷️ Tag Management** - Fixed tag concatenation in all tag operations (add_tags, remove_tags, bulk_update_todos)
-- **⚡ Bulk Operations** - Fixed multi-field updates; tags now work correctly in batch operations
-- **📅 Date Scheduling** - Reliable scheduling with `today`, `tomorrow`, `someday`, or specific dates (YYYY-MM-DD)
-- **✅ Validation** - Parameter validation prevents common errors and edge cases
-- **📊 Context Optimization** - Response modes provide 5-12x better performance than documented
+### Current Version: v1.4.4
+
+Highlights of recent stable behavior:
+- **🏷️ Tag Management** - Robust comma-separated tag handling across all tag operations
+- **⚡ Bulk Operations** - Multi-field updates apply all fields atomically per todo
+- **📅 Date Scheduling** - Reliable scheduling with `today`, `tomorrow`, `someday`, or `YYYY-MM-DD`
+- **✅ Tool Annotations** - All 37 tools declare `readOnlyHint`/`destructiveHint`/`title` for MCP-client UIs (since v1.5-pending; see commit `64c82a1`)
+- **📊 Context Optimization** - Response modes (`auto`/`summary`/`minimal`/`standard`/`detailed`/`raw`) for budget control
 
 ### Architecture
-- **Framework**: FastMCP 2.0 (Python 3.8+)
-- **Integration**: AppleScript via subprocess calls
-- **Testing**: pytest with mocked AppleScript operations  
+- **Framework**: FastMCP 2.0+ (3.2.4 in current venv)
+- **Runtime**: Python 3.8+ (3.13 in current venv)
+- **Integration**: AppleScript via subprocess + Things URL scheme for checklists
+- **Testing**: pytest with mocked AppleScript operations (469 unit tests)
 - **Platform**: macOS 12.0+ with Things 3 installed
+
+### Related Docs
+- `docs/ARCHITECTURE.md` — system layout
+- `docs/BULK_OPERATIONS_GUIDE.md` — patterns for bulk_*
+- `docs/USER_EXAMPLES.md` — end-user-style example calls
+- `docs/TROUBLESHOOTING.md` — common runtime issues
+- `docs/REFACTORING_PLAN.md` — internal-only 10-week quality plan
+- `docs/V2_API_MIGRATION.md` — proposal for native list parameters (not scheduled)
 
 ## Development Guidelines
 
@@ -68,10 +79,10 @@ result = self.applescript_manager.execute_script(script)
 4. **Permission errors**: System Settings → Privacy & Security → Automation → Enable Things 3 access
 
 ### API Coverage Status
-- **Implemented**: 25+ operations (40% of AppleScript API)
-- **Tested**: All features verified with comprehensive integration tests
-- **Roadmap**: See `docs/ROADMAP.md` for future features
-- **Priority**: Focus on daily workflow operations
+- **Implemented**: 37 tools (~45% of AppleScript API)
+- **Tested**: 469 unit tests + integration tests
+- **Roadmap**: See `docs/V2_API_MIGRATION.md` for the proposed v2 API; `docs/REFACTORING_PLAN.md` for internal cleanup
+- **Priority**: Daily workflow operations (read, list, create, update, move, search)
 
 ### Adding a New Tool
 
@@ -83,117 +94,6 @@ When registering a new `@self.mcp.tool()` in `server.py`:
 ### Why Some Params Use Comma-Separated Strings
 
 `tags`, `todo_ids`, etc. accept comma-separated strings (e.g. `tags="work,urgent"`) rather than native arrays. This is intentional and load-bearing for v1.x backward compatibility. The migration proposal lives in `docs/V2_API_MIGRATION.md` — out of scope for any non-major change.
-
-## 🐛 Recent Bug Fixes (v1.2.2+)
-
-### Fixed: Tag Removal String Parsing
-
-**Issue**: `remove_tags()` was treating tag strings as character arrays, removing individual characters instead of complete tag names.
-
-```python
-# ❌ BEFORE (Broken)
-remove_tags(todo_id="123", tags="test,Work")
-# Would try to remove: ['t','e','s','t',',','W','o','r','k']
-
-# ✅ AFTER (Fixed)
-remove_tags(todo_id="123", tags="test,Work")
-# Correctly removes: ['test', 'Work']
-```
-
-**Correct Usage:**
-```python
-# Single tag
-remove_tags(todo_id="abc123", tags="urgent")
-
-# Multiple tags (comma-separated, no spaces)
-remove_tags(todo_id="abc123", tags="test,High,Work")
-
-# Tag names are case-sensitive
-remove_tags(todo_id="abc123", tags="Work")  # Removes "Work"
-remove_tags(todo_id="abc123", tags="work")  # Removes "work" (different tag)
-```
-
-**Notes:**
-- Tag names are case-sensitive in Things 3
-- Non-existent tags are silently filtered (no error)
-- Use comma separation without spaces: `"tag1,tag2,tag3"`
-
-### Fixed: Bulk Update Multi-Field Support
-
-**Issue**: `bulk_update_todos()` was only applying the last field in multi-field updates due to script execution order.
-
-```python
-# ❌ BEFORE (Broken - only deadline applied)
-bulk_update_todos(
-    todo_ids="1,2,3",
-    tags="urgent,work",
-    deadline="2025-12-31"
-)
-
-# ✅ AFTER (Fixed - all fields applied)
-bulk_update_todos(
-    todo_ids="1,2,3",
-    tags="urgent,work",
-    deadline="2025-12-31"
-)
-```
-
-**Correct Usage:**
-
-```python
-# Single field updates (always worked)
-bulk_update_todos(todo_ids="1,2,3", completed="true")
-bulk_update_todos(todo_ids="1,2,3", tags="urgent")
-bulk_update_todos(todo_ids="1,2,3", when="today")
-
-# Multi-field updates (now fixed)
-bulk_update_todos(
-    todo_ids="abc,def,ghi",
-    tags="urgent,work",
-    when="today",
-    notes="Updated via bulk operation"
-)
-
-bulk_update_todos(
-    todo_ids="1,2,3",
-    tags="test,review",
-    deadline="2025-12-31",
-    notes="Q4 deliverables"
-)
-
-# Complete status change with metadata
-bulk_update_todos(
-    todo_ids="task1,task2",
-    completed="true",
-    notes="Completed in sprint review"
-)
-```
-
-**Supported Fields:**
-- `title` - Update todo title
-- `notes` - Update todo notes
-- `when` - Update scheduling (e.g., `"today"`, `"tomorrow"`, `"2025-12-31"`)
-- `deadline` - Update deadline date
-- `tags` - Replace tags (comma-separated)
-- `completed` - Mark as complete (`"true"`) or incomplete (`"false"`)
-- `canceled` - Mark as canceled (`"true"`) or active (`"false"`)
-
-**Performance:**
-- Processes updates sequentially per todo
-- Each todo gets all specified fields updated
-- Use for 2-50 todos (for larger batches, consider chunking)
-
-### Testing Notes
-
-Both bugs were discovered through comprehensive edge case testing:
-- String parsing validation for tag operations
-- Multi-field combination testing for bulk updates
-- Integration tests with real Things 3 database
-
-**Regression Prevention:**
-- Added unit tests for tag string parsing
-- Added integration tests for multi-field bulk updates
-- Validated with multiple tag/field combinations
 
 ## 🏷️ Tag Management
 
@@ -539,7 +439,7 @@ replace_checklist_items(
 
 ### Known Limitations
 
-2. **Project include_items context explosion**: ⚠️ **NEVER use `get_projects(include_items=true)`** - generates 252K+ tokens for 73 projects, exceeding context limits. Always use `get_projects(mode='summary')` first, then query specific projects.
+1. **Project include_items context explosion**: ⚠️ **NEVER use `get_projects(include_items=true)`** - generates 252K+ tokens for 73 projects, exceeding context limits. Always use `get_projects(mode='summary')` first, then query specific projects.
 
 **Workarounds:**
 - Use `get_projects(mode='minimal')` to get IDs, then query specific projects
@@ -555,7 +455,7 @@ replace_checklist_items(
 6. Batch todo moves with `bulk_move_records()`
 7. Create tags in Things 3 before using in API
 
-**For Complete Details:** See `PROJECTS_AREAS_TEST_REPORT.md` and `HIERARCHY_QUICK_REFERENCE.md`
+**For Complete Details:** See `docs/USER_EXAMPLES.md` and `docs/BULK_OPERATIONS_GUIDE.md`
 
 ### Error Prevention
 
@@ -581,47 +481,9 @@ replace_checklist_items(
 
 ## ⚠️ Common Pitfalls & Solutions
 
-### 1. Tag String Formatting
+> Tag-formatting rules (no spaces after comma, case-sensitive, must pre-exist) live under [Tag Management](#-tag-management) — not duplicated here.
 
-**Problem**: Spaces in comma-separated tags
-```python
-# ❌ WRONG - includes spaces
-add_tags(todo_id="123", tags="work, urgent, review")
-
-# ✅ CORRECT - no spaces
-add_tags(todo_id="123", tags="work,urgent,review")
-```
-
-### 2. Tag Case Sensitivity
-
-**Problem**: Inconsistent tag capitalization
-```python
-# These are THREE DIFFERENT tags in Things 3:
-add_tags(todo_id="123", tags="Work")   # Tag: "Work"
-add_tags(todo_id="123", tags="work")   # Tag: "work"
-add_tags(todo_id="123", tags="WORK")   # Tag: "WORK"
-
-# ✅ SOLUTION: Use consistent capitalization
-# Check existing tags first:
-tags = get_tags()
-# Then use exact match
-add_tags(todo_id="123", tags="Work")
-```
-
-### 3. Non-Existent Tags
-
-**Problem**: Trying to use tags that don't exist
-```python
-# ❌ Tag doesn't exist - silently ignored
-add_todo(title="Task", tags="nonexistent-tag")
-
-# ✅ CORRECT: Check tags first, create if needed
-tags = get_tags()
-# If tag missing, ask user:
-# "The tag 'project-x' doesn't exist. Please create it in Things 3 first."
-```
-
-### 4. Bulk Update Field Ordering
+### 1. Bulk Update Field Ordering
 
 **Problem**: Assuming field order matters (it doesn't)
 ```python
@@ -632,7 +494,7 @@ bulk_update_todos(todo_ids="1,2,3", when="today", tags="urgent")
 # All specified fields are applied to each todo
 ```
 
-### 5. Multi-Field vs Single-Field Updates
+### 2. Multi-Field vs Single-Field Updates
 
 **Problem**: Using single updates when bulk would be faster
 ```python
@@ -649,7 +511,7 @@ bulk_update_todos(
 )
 ```
 
-### 6. Project Creation with Initial Todos
+### 3. Project Creation with Initial Todos
 
 **Best Practice**: Use the `todos` parameter for efficient project creation with initial tasks
 ```python
@@ -669,7 +531,7 @@ add_todo(title="Task 3", list_id=project_id)
 
 **Note**: The `todos` parameter accepts newline-separated todo titles and creates them atomically with the project.
 
-### 7. Large Dataset Queries
+### 4. Large Dataset Queries
 
 **Problem**: Retrieving too much data at once
 ```python
