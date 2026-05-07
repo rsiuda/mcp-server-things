@@ -163,7 +163,15 @@ class ThingsMCPServer:
         """Register all MCP tools with the server."""
         
         # Todo management tools
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "List Todos",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def get_todos(
             project_uuid: Optional[str] = None,
             include_items: Optional[bool] = None,
@@ -171,15 +179,7 @@ class ThingsMCPServer:
             limit: Any = None,
             status: Optional[str] = 'incomplete'
         ) -> Dict[str, Any]:
-            """Get todos with context-aware response optimization. Supports mode parameter (auto/summary/minimal/standard/detailed/raw) and optional project filtering. Use mode='auto' for adaptive responses.
-
-            Args:
-                project_uuid: Optional project UUID to filter by
-                include_items: Include checklist items
-                mode: Response mode (auto/summary/minimal/standard/detailed/raw)
-                limit: Maximum number of results to return (1-500)
-                status: Filter by status - 'incomplete' (default), 'completed', 'canceled', or None for all
-            """
+            """List todos, optionally filtered by project or status, with response-mode optimization."""
             try:
                 # Validate mode parameter
                 if mode and mode not in ["auto", "summary", "minimal", "standard", "detailed", "raw"]:
@@ -271,11 +271,19 @@ class ThingsMCPServer:
                 logger.error(f"Error getting todos: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Create Tag",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": True,
+            },
+        )
         async def create_tag(
             tag_name: str = Field(..., description="Name of the tag to create")
         ) -> Dict[str, Any]:
-            """Create a new tag. Note: For human use only, AI should ask users to create tags."""
+            """Create a new tag (subject to ai_can_create_tags configuration)."""
             # Check if AI can create tags based on configuration
             if not self.config.ai_can_create_tags:
                 # Provide informative response for AI guidance
@@ -319,7 +327,15 @@ class ThingsMCPServer:
                     "message": "An error occurred while creating the tag"
                 }
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Add Todo",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": True,
+            },
+        )
         async def add_todo(
             title: str = Field(..., min_length=1, description="Title of the todo"),
             notes: Optional[str] = Field(None, description="Notes for the todo"),
@@ -331,7 +347,7 @@ class ThingsMCPServer:
             heading: Optional[str] = Field(None, description="Heading to add under"),
             checklist_items: Optional[List[str]] = Field(None, description="List of checklist items to add")
         ) -> Dict[str, Any]:
-            """Create a new todo. Supports scheduling (when='today', 'tomorrow', 'YYYY-MM-DD'), tags, projects, deadlines, and notes."""
+            """Create a new todo with optional tags, scheduling, project, deadline, and checklist items."""
             try:
                 # Validate date parameters
                 if when:
@@ -388,7 +404,15 @@ class ThingsMCPServer:
                 logger.error(f"Error adding todo: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Update Todo",
+                "readOnlyHint": False,
+                "destructiveHint": True,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def update_todo(
             id: str = Field(..., description="ID of the todo to update"),
             title: Optional[str] = Field(None, description="New title"),
@@ -399,7 +423,7 @@ class ThingsMCPServer:
             completed: Optional[str] = Field(None, description="Mark as completed (true/false)"),
             canceled: Optional[str] = Field(None, description="Mark as canceled (true/false)")
         ) -> Dict[str, Any]:
-            """Update an existing todo. Supports partial updates to any field including status, scheduling, tags, and content."""
+            """Update fields of an existing todo (partial update supported)."""
             try:
                 # Validate date parameters
                 if when:
@@ -465,7 +489,15 @@ class ThingsMCPServer:
                 logger.error(f"Error updating todo: {e}")
                 raise
 
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Bulk Update Todos",
+                "readOnlyHint": False,
+                "destructiveHint": True,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def bulk_update_todos(
             todo_ids: str = Field(..., description="Comma-separated list of todo IDs to update"),
             title: Optional[str] = Field(None, description="New title for all todos"),
@@ -476,7 +508,7 @@ class ThingsMCPServer:
             completed: Optional[str] = Field(None, description="Mark all as completed (true/false)"),
             canceled: Optional[str] = Field(None, description="Mark all as canceled (true/false)")
         ) -> Dict[str, Any]:
-            """Update multiple todos with the same changes in a single operation."""
+            """Apply the same field updates to multiple todos in one operation."""
             try:
                 # Validate date parameters
                 if when:
@@ -554,12 +586,20 @@ class ThingsMCPServer:
                     "updated_count": 0
                 }
 
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Append Checklist Items",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": True,
+            },
+        )
         async def add_checklist_items(
             todo_id: str = Field(..., description="ID of the todo to add checklist items to"),
             items: List[str] = Field(..., description="List of checklist items to add")
         ) -> Dict[str, Any]:
-            """Add checklist items to an existing todo. Items will be appended to the end of the existing checklist."""
+            """Append checklist items to an existing todo."""
             try:
                 if not items:
                     return {
@@ -574,12 +614,20 @@ class ThingsMCPServer:
                 logger.error(f"Error adding checklist items: {e}")
                 raise
 
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Prepend Checklist Items",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": True,
+            },
+        )
         async def prepend_checklist_items(
             todo_id: str = Field(..., description="ID of the todo to prepend checklist items to"),
             items: List[str] = Field(..., description="List of checklist items to prepend")
         ) -> Dict[str, Any]:
-            """Prepend checklist items to an existing todo. Items will be added at the beginning of the existing checklist."""
+            """Prepend checklist items to an existing todo."""
             try:
                 if not items:
                     return {
@@ -594,12 +642,20 @@ class ThingsMCPServer:
                 logger.error(f"Error prepending checklist items: {e}")
                 raise
 
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Replace Checklist Items",
+                "readOnlyHint": False,
+                "destructiveHint": True,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def replace_checklist_items(
             todo_id: str = Field(..., description="ID of the todo to replace checklist items in"),
             items: List[str] = Field(..., description="List of checklist items to replace with (empty list to clear all)")
         ) -> Dict[str, Any]:
-            """Replace all checklist items in a todo. This will remove all existing checklist items and replace them with the provided items."""
+            """Replace all checklist items in a todo (empty list clears the checklist)."""
             try:
                 result = await self.tools.replace_checklist_items(todo_id=todo_id, items=items)
                 return result
@@ -607,29 +663,53 @@ class ThingsMCPServer:
                 logger.error(f"Error replacing checklist items: {e}")
                 raise
 
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Get Todo by ID",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def get_todo_by_id(
             todo_id: str = Field(..., description="ID of the todo to retrieve")
         ) -> Dict[str, Any]:
-            """Get a specific todo by its ID."""
+            """Retrieve a single todo by its ID."""
             try:
                 return await self.tools.get_todo_by_id(todo_id)
             except Exception as e:
                 logger.error(f"Error getting todo by ID: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Delete Todo",
+                "readOnlyHint": False,
+                "destructiveHint": True,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def delete_todo(
             todo_id: str = Field(..., description="ID of the todo to delete")
         ) -> Dict[str, Any]:
-            """Delete a todo by ID."""
+            """Move a todo to the Things 3 trash."""
             try:
                 return await self.tools.delete_todo(todo_id)
             except Exception as e:
                 logger.error(f"Error deleting todo: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Move Todo",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def move_record(
             todo_id: str = Field(..., description="ID of the todo to move"),
             destination_list: str = Field(..., description="Destination: list name (inbox, today, anytime, someday, upcoming, logbook), project:ID, or area:ID")
@@ -641,13 +721,21 @@ class ThingsMCPServer:
                 logger.error(f"Error moving todo: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Bulk Move Todos",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def bulk_move_records(
             todo_ids: str = Field(..., description="Comma-separated list of todo IDs to move"),
             destination: str = Field(..., description="Destination: list name (inbox, today, anytime, someday, upcoming, logbook), project:ID, or area:ID"),
             max_concurrent: int = Field(5, description="Maximum concurrent operations (1-10)", ge=1, le=10)
         ) -> Dict[str, Any]:
-            """Move multiple todos to the same destination efficiently. The move operation handles scheduling automatically based on the destination."""
+            """Move multiple todos to the same destination concurrently."""
             try:
                 # Parse the comma-separated todo IDs
                 todo_id_list = [tid.strip() for tid in todo_ids.split(",") if tid.strip()]
@@ -672,12 +760,20 @@ class ThingsMCPServer:
                 raise
         
         # Project management tools
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "List Projects",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def get_projects(
             include_items: bool = Field(False, description="Include tasks within projects"),
             mode: Optional[str] = Field(None, description="Response mode (auto/summary/minimal/standard/detailed/raw)")
         ) -> Dict[str, Any]:
-            """Get all projects with optional task inclusion. Supports include_items and response optimization via mode parameter."""
+            """List all projects, with optional task inclusion and response-mode optimization."""
             try:
                 # Validate mode parameter
                 if mode and mode not in ["auto", "summary", "minimal", "standard", "detailed", "raw"]:
@@ -713,7 +809,15 @@ class ThingsMCPServer:
                 logger.error(f"Error getting projects: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Add Project",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": False,
+                "openWorldHint": True,
+            },
+        )
         async def add_project(
             title: str = Field(..., min_length=1, description="Title of the project"),
             notes: Optional[str] = Field(None, description="Notes for the project"),
@@ -724,7 +828,7 @@ class ThingsMCPServer:
             area_title: Optional[str] = Field(None, description="Title of area to add to"),
             todos: Optional[str] = Field(None, description="Newline-separated initial todos to create in the project")
         ) -> Dict[str, Any]:
-            """Create a new project. Supports areas, deadlines, tags, initial todos, and scheduling."""
+            """Create a new project with optional area, deadline, tags, scheduling, and initial todos."""
             try:
                 # Validate date parameters
                 if when:
@@ -767,7 +871,15 @@ class ThingsMCPServer:
                 logger.error(f"Error adding project: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Update Project",
+                "readOnlyHint": False,
+                "destructiveHint": True,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def update_project(
             id: str = Field(..., description="ID of the project to update"),
             title: Optional[str] = Field(None, description="New title"),
@@ -780,7 +892,7 @@ class ThingsMCPServer:
             completed: Optional[str] = Field(None, description="Mark as completed (true/false)"),
             canceled: Optional[str] = Field(None, description="Mark as canceled (true/false)")
         ) -> Dict[str, Any]:
-            """Update an existing project. Supports partial updates to any field including status, scheduling, tags, and content."""
+            """Update fields of an existing project (partial update supported)."""
             try:
                 # Validate date parameters
                 if when:
@@ -834,12 +946,20 @@ class ThingsMCPServer:
                 raise
         
         # Area management tools
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "List Areas",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def get_areas(
             include_items: bool = Field(False, description="Include projects and tasks within areas"),
             mode: Optional[str] = Field(None, description="Response mode (auto/summary/minimal/standard/detailed/raw)")
         ) -> Dict[str, Any]:
-            """Get all areas with optional project/task inclusion. Supports include_items and response optimization via mode parameter."""
+            """List all areas, with optional project/task inclusion."""
             try:
                 # Validate mode parameter
                 if mode and mode not in ["auto", "summary", "minimal", "standard", "detailed", "raw"]:
@@ -876,12 +996,20 @@ class ThingsMCPServer:
                 raise
         
         # List-based tools
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Get Inbox",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def get_inbox(
             mode: Optional[str] = Field(None, description="Response mode: auto/summary/minimal/standard/detailed/raw"),
             limit: Optional[int] = Field(None, description="Maximum number of items to return (1-500)", ge=1, le=500)
         ) -> Dict[str, Any]:
-            """Get todos from Inbox. Supports response optimization via mode parameter and limit."""
+            """List todos in the Things 3 Inbox."""
             try:
                 # Get raw data with optional limit
                 raw_data = await self.tools.get_inbox(limit=limit)
@@ -898,12 +1026,20 @@ class ThingsMCPServer:
                 logger.error(f"Error getting inbox: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Get Today's Todos",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def get_today(
             mode: Optional[str] = Field(None, description="Response mode: auto/summary/minimal/standard/detailed/raw"),
             limit: Optional[int] = Field(None, description="Maximum number of items to return (1-500)", ge=1, le=500)
         ) -> Dict[str, Any]:
-            """Get todos due today. Supports response optimization via mode parameter and limit."""
+            """List todos scheduled for today."""
             try:
                 # Get raw data with optional limit
                 raw_data = await self.tools.get_today(limit=limit)
@@ -920,17 +1056,21 @@ class ThingsMCPServer:
                 logger.error(f"Error getting today's todos: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Get Upcoming Todos",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def get_upcoming(
             mode: Optional[str] = Field(None, description="Response mode: auto/summary/minimal/standard/detailed/raw"),
             limit: Optional[int] = Field(None, description="Maximum number of items to return (1-500)", ge=1, le=500),
             days: Optional[int] = Field(None, description="If provided, returns todos due/activating within this many days (1-365). Without days, returns items from Things 3's Upcoming list.", ge=1, le=365)
         ) -> Dict[str, Any]:
-            """Get upcoming todos. Supports response optimization via mode parameter and limit.
-
-            If 'days' is provided, returns todos due or activating within that timeframe.
-            Without 'days', returns items from Things 3's built-in Upcoming list.
-            """
+            """List upcoming todos; with 'days', filters by date range, otherwise returns the Upcoming list."""
             try:
                 # If days is specified, filter todos by date range
                 if days is not None:
@@ -970,12 +1110,20 @@ class ThingsMCPServer:
                 logger.error(f"Error getting upcoming todos: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Get Anytime Todos",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def get_anytime(
             mode: Optional[str] = Field(None, description="Response mode: auto/summary/minimal/standard/detailed/raw"),
             limit: Optional[int] = Field(None, description="Maximum number of items to return (1-500)", ge=1, le=500)
         ) -> Dict[str, Any]:
-            """Get todos from Anytime list. Supports response optimization via mode parameter and limit."""
+            """List todos in the Anytime list."""
             try:
                 # Get raw data with optional limit
                 raw_data = await self.tools.get_anytime(limit=limit)
@@ -992,12 +1140,20 @@ class ThingsMCPServer:
                 logger.error(f"Error getting anytime todos: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Get Someday Todos",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def get_someday(
             mode: Optional[str] = Field(None, description="Response mode: auto/summary/minimal/standard/detailed/raw"),
             limit: Optional[int] = Field(None, description="Maximum number of items to return (1-500)", ge=1, le=500)
         ) -> Dict[str, Any]:
-            """Get todos from Someday list. Supports response optimization via mode parameter and limit."""
+            """List todos in the Someday list."""
             try:
                 # Get raw data with optional limit
                 raw_data = await self.tools.get_someday(limit=limit)
@@ -1014,38 +1170,40 @@ class ThingsMCPServer:
                 logger.error(f"Error getting someday todos: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Get Logbook",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def get_logbook(
             limit: int = Field(50, description="Maximum number of entries to return. Defaults to 50", ge=1, le=100),
             period: str = Field("7d", description="Time period to look back (e.g., '3d', '1w', '2m', '1y'). Defaults to '7d'", pattern=r"^\d+[dwmy]$")
         ) -> List[Dict[str, Any]]:
-            """Get completed todos from Logbook. Supports limit (max 100) and period filters (e.g., '7d', '1w')."""
+            """List recently completed todos from the Logbook."""
             try:
                 return await self.tools.get_logbook(limit=limit, period=period)
             except Exception as e:
                 logger.error(f"Error getting logbook: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Get Trash",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def get_trash(
             limit: int = Field(50, description="Maximum number of items to return (default: 50, max: 100)", ge=1, le=100),
             offset: int = Field(0, description="Number of items to skip (default: 0)", ge=0)
         ) -> Dict[str, Any]:
-            """Get trashed todos with pagination support.
-
-            Returns a dictionary containing:
-            - items: List of trashed todos
-            - total_count: Total number of items in trash
-            - limit: Applied limit value
-            - offset: Applied offset value
-            - has_more: Boolean indicating if more items are available
-
-            Examples:
-            - get_trash() - Get first 50 items
-            - get_trash(limit=20) - Get first 20 items
-            - get_trash(limit=50, offset=50) - Get items 51-100
-            - get_trash(limit=100, offset=200) - Get items 201-300
-            """
+            """List items in the Things 3 trash, with pagination."""
             try:
                 return await self.tools.get_trash(limit=limit, offset=offset)
             except Exception as e:
@@ -1053,22 +1211,38 @@ class ThingsMCPServer:
                 raise
         
         # Efficient date-range query tools using AppleScript 'whose' clause
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Get Todos Due Within N Days",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def get_due_in_days(
             days: int = Field(30, description="Number of days ahead to check for due todos", ge=1, le=365)
         ) -> List[Dict[str, Any]]:
-            """Get todos due within specified days (1-365). Uses efficient AppleScript filtering."""
+            """List todos due within the next N days (1-365)."""
             try:
                 return await self.tools.get_todos_due_in_days(days)
             except Exception as e:
                 logger.error(f"Error getting todos due in {days} days: {e}")
                 return {"error": str(e), "todos": []}
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Get Todos Activating Within N Days",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def get_activating_in_days(
             days: int = Field(30, description="Number of days ahead to check for activating todos", ge=1, le=365)
         ) -> List[Dict[str, Any]]:
-            """Get todos activating within specified days (1-365)."""
+            """List todos activating within the next N days (1-365)."""
             try:
                 return await self.tools.get_todos_activating_in_days(days)
             except Exception as e:
@@ -1076,22 +1250,38 @@ class ThingsMCPServer:
                 return {"error": str(e), "todos": []}
         
         # Tag management tools
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "List Tags",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def get_tags(
             include_items: bool = Field(False, description="Include items list (True) or just counts (False)")
         ) -> List[Dict[str, Any]]:
-            """Get all tags with item counts or full items. Use include_items=true for full item lists."""
+            """List all tags with item counts (or full item lists when include_items is true)."""
             try:
                 return await self.tools.get_tags(include_items=include_items)
             except Exception as e:
                 logger.error(f"Error getting tags: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Get Items by Tag",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def get_tagged_items(
             tag: str = Field(..., description="Tag title to filter by")
         ) -> List[Dict[str, Any]]:
-            """Get todos with a specific tag."""
+            """List todos that carry a specific tag."""
             try:
                 return await self.tools.get_tagged_items(tag=tag)
             except Exception as e:
@@ -1099,13 +1289,21 @@ class ThingsMCPServer:
                 raise
         
         # Search tools
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Search Todos",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def search_todos(
             query: str = Field(..., description="Search term to look for in todo titles and notes"),
             limit: int = Field(50, description="Maximum number of results to return (1-500)", ge=1, le=500),
             mode: Optional[str] = None
         ) -> Dict[str, Any]:
-            """Search todos by query term. Supports limit (1-500) and response modes for context optimization."""
+            """Search todos by query term across titles and notes."""
             try:
                 # Validate mode parameter
                 if mode and mode not in ["auto", "summary", "minimal", "standard", "detailed", "raw"]:
@@ -1147,7 +1345,15 @@ class ThingsMCPServer:
                 logger.error(f"Error searching todos: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Advanced Search",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def search_advanced(
             status: Optional[str] = Field(None, description="Filter by todo status", pattern="^(incomplete|completed|canceled)$"),
             type: Optional[str] = Field(None, description="Filter by item type", pattern="^(to-do|project|heading)$"),
@@ -1158,7 +1364,7 @@ class ThingsMCPServer:
             limit: int = Field(50, description="Maximum number of results to return (1-500)", ge=1, le=500),
             mode: Optional[str] = None
         ) -> Dict[str, Any]:
-            """Advanced search with multiple filters: status, type, tag, area, start_date, deadline. Supports response modes and limit (1-500) for efficient retrieval."""
+            """Search todos with advanced filters (status, type, tag, area, start_date, deadline)."""
             try:
                 # Import datetime for validation
                 from datetime import datetime
@@ -1240,11 +1446,19 @@ class ThingsMCPServer:
                 logger.error(f"Error in advanced search: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Get Recently Created Items",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def get_recent(
             period: str = Field(..., description="Time period (e.g., '3d', '1w', '2m', '1y')", pattern=r"^\d+[dwmy]$")
         ) -> List[Dict[str, Any]]:
-            """Get recently created items within a time period (e.g., '3d', '1w')."""
+            """List recently created items within a time period (e.g. '3d', '1w')."""
             try:
                 return await self.tools.get_recent(period=period)
             except Exception as e:
@@ -1252,12 +1466,20 @@ class ThingsMCPServer:
                 raise
         
         # Navigation tools
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Add Tags",
+                "readOnlyHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def add_tags(
             todo_id: str = Field(..., description="ID of the todo"),
             tags: str = Field(..., description="Comma-separated tags to add")
         ) -> Dict[str, Any]:
-            """Add tags to a todo. Only existing tags can be applied."""
+            """Add tags to a todo (only existing tags applied)."""
             try:
                 # Convert comma-separated tags to list
                 tag_list = [t.strip() for t in tags.split(",")] if tags else []
@@ -1289,7 +1511,15 @@ class ThingsMCPServer:
                 logger.error(f"Error adding tags: {e}")
                 raise
         
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Remove Tags",
+                "readOnlyHint": False,
+                "destructiveHint": True,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def remove_tags(
             todo_id: str = Field(..., description="ID of the todo"),
             tags: str = Field(..., description="Comma-separated tags to remove")
@@ -1312,7 +1542,15 @@ class ThingsMCPServer:
             """Empty request model - health_check takes no parameters."""
             pass
 
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Health Check",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
         async def health_check(request: Optional[HealthCheckRequest] = None) -> Dict[str, Any]:
             """Check server health and Things 3 connectivity."""
             try:
@@ -1336,9 +1574,17 @@ class ThingsMCPServer:
             """Empty request model - queue_status takes no parameters."""
             pass
 
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Queue Status",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
         async def queue_status(request: Optional[QueueStatusRequest] = None) -> Dict[str, Any]:
-            """Get operation queue status and statistics."""
+            """Report operation queue status and active operations."""
             try:
                 queue = await get_operation_queue()
                 status = queue.get_queue_status()
@@ -1360,9 +1606,17 @@ class ThingsMCPServer:
             """Empty request model - context_stats takes no parameters."""
             pass
 
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Context Usage Stats",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
         async def context_stats(request: Optional[ContextStatsRequest] = None) -> Dict[str, Any]:
-            """Get context usage statistics and optimization insights."""
+            """Report context-budget usage and optimization stats."""
             try:
                 stats = self.context_manager.get_context_usage_stats()
 
@@ -1395,9 +1649,17 @@ class ThingsMCPServer:
             """Empty request model - get_server_capabilities takes no parameters."""
             pass
 
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Get Server Capabilities",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
         async def get_server_capabilities(request: Optional[ServerCapabilitiesRequest] = None) -> Dict[str, Any]:
-            """Get server capabilities, features, API coverage, and optimization settings. Returns structured information about available tools, response modes, and performance characteristics."""
+            """Report server capabilities, features, and tool inventory."""
             try:
                 capabilities = {
                     "server_info": {
@@ -1523,11 +1785,19 @@ class ThingsMCPServer:
                     }
                 }
 
-        @self.mcp.tool()
+        @self.mcp.tool(
+            annotations={
+                "title": "Get Usage Recommendations",
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        )
         async def get_usage_recommendations(
             operation: Optional[str] = Field(None, description="Specific operation to get recommendations for (e.g., 'get_todos', 'bulk_move')")
         ) -> Dict[str, Any]:
-            """Get usage recommendations for efficient MCP operations. Optionally specify an operation name for targeted guidance."""
+            """Suggest efficient usage patterns, optionally for a specific operation."""
             try:
                 recommendations = {
                     "timestamp": self.applescript_manager._get_current_timestamp(),
