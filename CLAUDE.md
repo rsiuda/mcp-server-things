@@ -73,6 +73,17 @@ result = self.applescript_manager.execute_script(script)
 - **Roadmap**: See `docs/ROADMAP.md` for future features
 - **Priority**: Focus on daily workflow operations
 
+### Adding a New Tool
+
+When registering a new `@self.mcp.tool()` in `server.py`:
+- Use the helpers `_read_tool_annotations(title)` or `_write_tool_annotations(title, destructive=, idempotent=)` (defined at `server.py:33-55`). Never inline annotation dicts — that pattern was deliberately removed.
+- Single-line imperative docstring; param docs belong in `Field(description=...)`.
+- Bump `EXPECTED_TOOL_COUNT` (and update `DESTRUCTIVE_TOOLS` if applicable) in `tests/unit/test_annotations.py`, otherwise the regression suite fails.
+
+### Why Some Params Use Comma-Separated Strings
+
+`tags`, `todo_ids`, etc. accept comma-separated strings (e.g. `tags="work,urgent"`) rather than native arrays. This is intentional and load-bearing for v1.x backward compatibility. The migration proposal lives in `docs/V2_API_MIGRATION.md` — out of scope for any non-major change.
+
 ## 🐛 Recent Bug Fixes (v1.2.2+)
 
 ### Fixed: Tag Removal String Parsing
